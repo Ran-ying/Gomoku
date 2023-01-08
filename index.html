@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gomoku</title>
+    <script src="jquery.min.js"></script>
+    <script>
+        var wsURL = `ws://${window.location.host}`
+        var ws;
+        var length = -20;
+        var canvas, ctx;
+        var user;
+        var historyChess;
+        var firstStepChange = false;
+        var chessBoard = Array();
+        var myStep;
+        var superMode = false;
+        $(() => {
+            //初始化棋盘
+            let height = $(window).height();
+            let width = $(window).width();
+            length += height < width ? height : width;
+            init(length);
+
+        });
+        var setUser = ()=>{
+            user = $("#setUser").val();
+            $("#user").html(`您是：${user}`);
+            //加载数据
+            openWS();
+        }
+        var openWS = ()=>{
+            ws = new WebSocket(`${wsURL}/${user}`);
+            ws.onopen = ()=>{}
+            ws.onmessage = (message)=>{load(JSON.parse(message.data))};
+            ws.onclose = ()=>{
+                setTimeout(()=>{
+                    openWS();
+                },100)
+            }
+        }
+
+        //初始化棋盘方法
+        var init = (length) => {
+            clearHistory();
+
+            $("#canvas").css({
+                width: length,
+                height: length
+            });
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = "#f8e8b7";
+            ctx.fillRect(0, 0, zoom(16), zoom(16));
+
+            for (let i = 1; i < 16; i++) {
+                ctx.beginPath();
+                ctx.moveTo(zoom(1), zoom(i));
+                ctx.lineTo(zoom(15), zoom(i));
+                ctx.moveTo(zoom(i), zoom(1));
+                ctx.lineTo(zoom(i), zoom(15));
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#67563c';
+                ctx.stroke();
+            }
+            let points = {
+                1: {
+                    x: 8,
+                    y: 8
+                },
+                2: {
+                    x: 4,
+                    y: 4
+                },
+                3: {
+                    x: 4,
+                    y: 12
+                },
+                4: {
+                    x: 12,
+                    y: 4
+                },
+                5: {
+                    x: 12,
+                    y: 12
+                },
+            };
+            for (let i in points) {
+                ctx.beginPath();
+                ctx.arc(zoom(points[i].x), zoom(points[i].y), 8, 0, Math.PI * 2);
+                ctx.fillStyle = "#000";
+                ctx.fill();
+            }
+            for (let i = 0; i < 16; i++) {
+                let temp = Array();
+                for (let o = 0; o < 16; o++) temp[o] = 0;
+                chessBoard[i] = temp;
+            }
+        }
+
+        $(() => {
+            $("#canvas").click((e) => {
+                if (!myStep) {
+                    addHistory("当前不能下子");
+                    return;
+                }
+                let x = Math.round(16 * e.offsetX / (length - 2 * 4));
+                let y = Math.round(16 * e.offsetY / (length - 2 * 4));
+                clickAddChess(x, y);
+            });
+        });
+
+        var clickAddChess = (x, y)=>{
+            let color = historyChess["first"] == user ? 1 : -1;
+            if (addChess(x, y, color)) {
+                historyChess["history"].push({
+                    x: x,
+                    y: y,
+                    color: color
+                });
+                uploadHistoryStep();
+            }
+        }
+
+        var logIndex = 0;
+        var addChess = (x, y, color) => {
+            if(x==0||y==0||x==16||y==16) return false;
+            if (chessBoard[x][y] == 0) {
+                drawChess(x, y, color == 1 ? "black" : "white", ctx);
+                chessBoard[x][y] = color;
+                myStep = false;
+                //addHistory(`${logIndex++}:{x:${x}, y:${y}},`);
+                return true;
+            } else {
+                addHistory("此处已经下棋");
+                return false;
+            }
+        }
+
+        //悔棋方法
+        var backChess = () => {
+            if (!firstStepChange) {
+                if (historyChess["history"][historyChess["history"].length - 1]["color"] == (historyChess["first"] == user ? 1 : -1)) {
+                    addHistory("可悔棋！");
+                    historyChess["history"].pop();
+                    uploadHistoryStep();
+                } else {
+                    addHistory("不可悔棋！");
+                }
+            } else alert("没有下怎么悔棋嘛！");
+        }
+
+        //加载数据方法
+        var load = (data) => {
+            historyChess = data;
+            firstStepChange = historyChess["history"].length == 0;
+            $("#firstStep").html(`${historyChess["first"]}先手`);
+            init(length);
+            if (firstStepChange) {
+                myStep = historyChess["first"] == user;
+            } else {
+                for (let i in historyChess["history"]) {
+                    let x = historyChess["history"][i]["x"];
+                    let y = historyChess["history"][i]["y"];
+                    let color = historyChess["history"][i]["color"];
+                    addChess(x, y, color);
+                }
+                myStep = !(historyChess["history"][historyChess["history"].length - 1]["color"] == (historyChess["first"] == user ? 1 : -1));
+
+                logIndex = 0;
+
+            }
+            superMode = historyChess["superMode"];
+            if(superMode){
+                myStep = true;
+                addHistory("可以下子");
+            }
+            else {
+                addHistory(myStep ? "可以下子" : "不能下子");
+            }
+        }
+
+        //上传数据方法
+        var uploadHistoryStep = () => {
+            ws.send(JSON.stringify(historyChess))
+        };
+
+        //缩放返回方法
+        var zoom = (value) => {
+            return value * 80
+        };
+
+        //棋子绘制方法
+        var drawChess = (x, y, color, ctx) => {
+            ctx.beginPath();
+            ctx.arc(zoom(x), zoom(y), 30, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        //添加历史方法
+        var addHistory = (content) => {
+            $("#history").prepend(content + "<br>");
+        };
+        //清除历史方法
+        var clearHistory = () => {
+            $("#history").html("");
+        }
+        $(() => {
+            (() => {
+                //:)
+            })()
+        });
+        //重新开始方法
+        var recover = () => {
+            if (confirm("您确定要重新开始吗？")) {
+                historyChess = {
+                    first: user,
+                    history: Array(),
+                    superMode: false
+                };
+                uploadHistoryStep();
+            }
+        }
+
+        //////////高级模式
+        var highmode = ()=>{
+            historyChess["superMode"] = true;
+            uploadHistoryStep();
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            text-align: center;
+            background-color: rgb(234, 234, 234);
+        }
+
+        #canvas {
+            box-sizing: border-box;
+            border: 4px solid;
+            margin: 0 auto;
+            margin-top: 10px;
+        }
+
+        #ControlPanel {
+            position: absolute;
+            left: 0px;
+            bottom: 0px;
+        }
+
+        .button {
+            cursor: pointer;
+            margin: 4px;
+            padding: 4px;
+            border: 2px solid;
+            border-radius: 8px;
+            font-size: larger;
+            user-select: none;
+            background-color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas" width="1280" height="1280"></canvas>
+    <div id="ControlPanel">
+        <div id="history"></div>
+        <div id="user"></div><input id="setUser"><button onclick="setUser()">设置用户</button>
+        <div class="button" onclick="recover()">重新开始</div>
+        <div class="button" onclick="backChess()">悔棋！</div>
+    </div>
+</body>
+
+</html>
